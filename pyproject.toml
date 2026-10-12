@@ -45,7 +45,7 @@ guardrun = "guardrun.cli.main:main"
 
 [project.optional-dependencies]
 # tomli lets mypy check the Python 3.10 import path from any interpreter.
-dev = ["pytest>=9.1.1", "pytest-cov>=6.0", "ruff>=0.16.9", "mypy>=2.3.1", "tomli>=2.0"]
+dev = ["pytest>=9.1.1", "pytest-cov>=7.1.0", "ruff>=0.16.9", "mypy>=2.3.1", "tomli>=2.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
