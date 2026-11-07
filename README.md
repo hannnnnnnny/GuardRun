@@ -2,10 +2,11 @@
 
 [![CI](https://github.com/hannnnnnnny/GuardRun/actions/workflows/ci.yml/badge.svg)](https://github.com/hannnnnnnny/GuardRun/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/hannnnnnnny/GuardRun/actions/workflows/codeql.yml/badge.svg)](https://github.com/hannnnnnnny/GuardRun/actions/workflows/codeql.yml)
+[![Release](https://img.shields.io/github/v/release/hannnnnnnny/GuardRun)](https://github.com/hannnnnnnny/GuardRun/releases/latest)
 
 A powerful, safety-first agent harness for DeepSeek and Claude models, written in Python.
 
-GuardRun gives Claude real tools (files, search, and a shell) inside a single
+GuardRun gives the model real tools (files, search, and a shell) inside a single
 workspace directory, and puts a layered safety system between the model and
 your machine: a path sandbox, a shell command policy, approval modes, secret
 redaction, prompt-injection flagging, budgets, and an audit log.
@@ -19,13 +20,37 @@ you ──task──▶ Agent loop ──request──▶ Claude
                  └──────── events ──▶ audit log, console
 ```
 
+On top of that sits **missions**: hand GuardRun a big goal (a week of work),
+and AI publishes tasks to AI, does them, inspects them, and reworks them until
+there is a result. You only hear about what truly needs a human.
+
+> **中文简介：** GuardRun 是一个安全优先的 AI Agent 运行框架（默认 DeepSeek，也支持 Claude）。
+> 它的“任务（mission）”功能可以把一个大目标交给 AI：规划员拆分任务、执行者逐个完成、
+> 质检员按验收标准检查并打回重做，直到出结果——一次就能安排一周的活儿。
+> 只有遇到重大问题（缺少凭据、反复质检不过、预算用完、疑似提示词注入）才会写进
+> `guardrun inbox` 提醒你。Windows 用户可直接从
+> [Releases](https://github.com/hannnnnnnny/GuardRun/releases/latest) 下载 `.exe`，无需安装 Python。
+
 ## Install
 
-```bash
-pip install -e ".[dev]"
+**Windows, no Python needed:** download `guardrun-<version>-windows-x64.exe`
+from the [latest release](https://github.com/hannnnnnnny/GuardRun/releases/latest),
+rename it to `guardrun.exe`, and put it on your `PATH` (or run it from the
+project folder). Each release also ships a `.sha256` file to verify the download:
+
+```powershell
+(Get-FileHash .\guardrun-0.2.0-windows-x64.exe -Algorithm SHA256).Hash
 ```
 
-Python 3.10 or newer. GuardRun uses **DeepSeek** by default (`deepseek-v4-pro`
+**With Python 3.10+ (any OS):** install the wheel attached to the release, or
+from source:
+
+```bash
+pip install guardrun-0.2.0-py3-none-any.whl   # from the release page
+pip install -e ".[dev]"                       # from a checkout, for development
+```
+
+GuardRun uses **DeepSeek** by default (`deepseek-v4-pro`
 via DeepSeek's Anthropic-compatible API). Put your key in an environment
 variable; GuardRun reads it from there and never stores it:
 
