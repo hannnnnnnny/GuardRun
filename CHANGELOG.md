@@ -6,6 +6,18 @@ All notable changes to GuardRun are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Missions: `guardrun mission plan|import|run|status` turns a large goal into
+  tasks and works through them unattended. A read-only planner publishes the
+  tasks, workers do them, and a read-only inspector checks each result against
+  its acceptance criteria and automated checks, sending weak work back with
+  feedback. Dependent tasks wait; independent ones keep going.
+- `guardrun inbox`: only what needs a human (escalations, tasks that failed
+  inspection, spent budgets, suspected prompt injection), redacted.
+- `[mission]` settings: `max_attempts`, `max_tasks`, `max_cost_usd`.
+- `AgentOptions.tools` replaces the built-in tool set (e.g. read-only tools).
+- `examples/mission_demo.py` and `examples/weekly_mission.toml`.
+
 ## [0.1.0] - 2026-10-20
 
 First release: a safety-first agent harness for DeepSeek and Claude.

@@ -1,0 +1,38 @@
+# A week of work for `guardrun mission import examples/weekly_mission.toml`.
+# Tasks run in dependency order; independent tasks keep going if one is blocked.
+
+goal = "Harden the project before the next release"
+
+[[tasks]]
+id = "audit-todos"
+title = "Inventory TODO and FIXME comments"
+instructions = """
+Find every TODO and FIXME in the source tree. Write docs/todo-inventory.md
+listing each one with its file, line, and a one-line assessment of its risk.
+"""
+acceptance = [
+  "docs/todo-inventory.md exists",
+  "every TODO/FIXME in src/ is listed with file and line",
+]
+
+[[tasks]]
+id = "type-hints"
+title = "Add missing type hints in the utils module"
+instructions = "Add precise type hints to every public function in src/utils.py."
+acceptance = ["every public function in src/utils.py is fully annotated"]
+checks = ["mypy src/utils.py"]
+
+[[tasks]]
+id = "tests-for-utils"
+title = "Cover utils with tests"
+instructions = "Write tests for every public function in src/utils.py, including edge cases."
+acceptance = ["each public function has at least one test", "edge cases are covered"]
+checks = ["pytest -q tests/test_utils.py"]
+depends_on = ["type-hints"]
+
+[[tasks]]
+id = "release-notes"
+title = "Draft release notes"
+instructions = "Summarize the week's changes in CHANGELOG.md under Unreleased."
+acceptance = ["CHANGELOG.md lists the type hints, the new tests, and the TODO inventory"]
+depends_on = ["audit-todos", "tests-for-utils"]

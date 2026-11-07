@@ -46,6 +46,7 @@ guardrun run "add type hints to utils.py and run the tests"
 guardrun chat                                  # multi-turn session
 guardrun run "continue" --resume 3f2a9c1b7d4e  # pick a session back up
 guardrun usage                                 # tokens and cost of recent runs
+guardrun mission plan "GOAL" --run              # plan, do, and inspect a whole goal
 guardrun policy "rm -rf build"                 # how would this command be treated?
 ```
 
@@ -57,6 +58,34 @@ When the agent wants to do something risky it asks first:
   reason: write actions require approval in ask mode
   allow? [y]es once / [a]lways this session / [N]o (optionally: n <why>):
 ```
+
+## Missions: a week of work, unattended
+
+Give GuardRun a big goal and let it run until there is a result. A planner
+publishes tasks, workers do them one by one, and an inspector checks every
+result against its acceptance criteria and sends weak work back with feedback.
+You are told only what needs a human.
+
+```bash
+guardrun mission plan "migrate the config loader to pydantic and update the docs" --run
+guardrun mission import examples/weekly_mission.toml   # or write the plan yourself
+guardrun mission run 1ce02250ec55                      # resume after a stop
+guardrun mission status                                # what got done
+guardrun inbox                                         # what needs you
+```
+
+```text
+== tests-for-utils: Cover utils with tests (attempt 1)
+   QA sent back: parse_date has no test for an empty string.
+== tests-for-utils: Cover utils with tests (attempt 2)
+   QA passed: all public functions covered; pytest passed.
+== deploy-docs: Publish the docs (attempt 1)
+   -> escalated: the docs host needs credentials that are not configured
+   [needs you] the docs host needs credentials that are not configured
+```
+
+Workers run in `unattended` mode, so your shell allowlist decides what they
+can execute; planners and inspectors are read-only. See [Missions](docs/missions.md).
 
 ## Approval modes
 
@@ -109,12 +138,13 @@ print(result.stop, result.text)
 
 `result.stop` is one of `completed`, `refused`, `max_tokens`, `budget`,
 `stuck`, `cancelled`, or `error`. See [`examples/`](examples/) for custom tools,
-project-specific policy gates (`AgentOptions(extra_gates=[...])`), and an
-offline demo.
+project-specific policy gates (`AgentOptions(extra_gates=[...])`), an offline
+demo, and an offline mission (`examples/mission_demo.py`).
 
 ## Documentation
 
 - [Architecture](docs/architecture.md): how a run flows through the system
+- [Missions](docs/missions.md): planner, workers, inspector, and the inbox
 - [Security model](docs/security-model.md): what is protected, how, and the known limits
 - [Configuration](docs/configuration.md): every `guardrun.toml` setting
 - [CLI reference](docs/cli.md): every command and flag

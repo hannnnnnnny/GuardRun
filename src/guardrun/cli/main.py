@@ -12,6 +12,8 @@ from typing import Any, TextIO
 
 from guardrun import __version__
 from guardrun.agent import Agent, RunResult
+from guardrun.cli.mission import add_parsers as add_mission_parsers
+from guardrun.cli.mission import cmd_inbox, cmd_mission, cmd_mission_status
 from guardrun.cli.render import ConsoleRenderer, format_result, result_to_dict
 from guardrun.cli.starter import STARTER_CONFIG
 from guardrun.config import CONFIG_FILENAME, PROVIDER_DEFAULT_MODELS, Config, load_config
@@ -85,6 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("-w", "--workspace", type=Path, default=Path.cwd())
     init = sub.add_parser("init", help="write a starter guardrun.toml")
     init.add_argument("-w", "--workspace", type=Path, default=Path.cwd())
+    add_mission_parsers(sub)
     return parser
 
 
@@ -259,17 +262,22 @@ _STATE_COMMANDS: dict[str, Callable[[argparse.Namespace, IO], int]] = {
     "audit": cmd_audit,
     "sessions": cmd_sessions,
     "usage": cmd_usage,
+    "inbox": cmd_inbox,
 }
 
 
 def _dispatch(args: argparse.Namespace, io: IO, factory: ProviderFactory) -> int:
     if args.command in _STATE_COMMANDS:
         return _STATE_COMMANDS[args.command](args, io)
+    if args.command == "mission" and args.mission_command == "status":
+        return cmd_mission_status(args, io)
     config = apply_overrides(load_config(args.workspace), args)
     if args.command == "policy":
         return cmd_policy(args, config, io)
     if args.command == "chat":
         return cmd_chat(args, config, io, factory)
+    if args.command == "mission":
+        return cmd_mission(args, config, io, factory)
     return cmd_run(args, config, io, factory)
 
 

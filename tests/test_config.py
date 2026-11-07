@@ -3,8 +3,15 @@ from typing import Any
 
 import pytest
 
-from guardrun.config import CONFIG_FILENAME, Config, load_config, parse_config
+from guardrun.config import (
+    CONFIG_FILENAME,
+    MAX_MISSION_TASKS,
+    Config,
+    load_config,
+    parse_config,
+)
 from guardrun.errors import ConfigError
+from guardrun.mission.plan import MAX_TASKS
 from guardrun.safety.modes import ApprovalMode
 
 FULL = """
@@ -135,3 +142,32 @@ def test_explicit_model_wins_over_provider_default() -> None:
 def test_unknown_provider_rejected() -> None:
     with pytest.raises(ConfigError, match=r"model\.provider must be one of"):
         parse_config({"model": {"provider": "openai"}})
+
+
+def test_mission_section() -> None:
+    config = parse_config({"mission": {"max_attempts": 5, "max_tasks": 50, "max_cost_usd": 20}})
+    assert config.mission_max_attempts == 5
+    assert config.mission_max_tasks == 50
+    assert config.mission_max_cost_usd == 20.0
+    defaults = parse_config({})
+    assert (defaults.mission_max_attempts, defaults.mission_max_tasks) == (3, 20)
+    assert defaults.mission_max_cost_usd is None
+
+
+@pytest.mark.parametrize(
+    "mission",
+    [
+        {"max_attempts": 0},
+        {"max_attempts": 1.5},
+        {"max_tasks": 51},
+        {"max_cost_usd": -1},
+        {"retries": 2},
+    ],
+)
+def test_invalid_mission_section(mission: dict[str, Any]) -> None:
+    with pytest.raises(ConfigError):
+        parse_config({"mission": mission})
+
+
+def test_mission_task_cap_matches_the_plan_limit() -> None:
+    assert MAX_MISSION_TASKS == MAX_TASKS

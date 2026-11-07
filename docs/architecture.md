@@ -16,6 +16,7 @@ tool call routed through one choke point where safety decisions are made.
 | `guardrun.budget` | Turn / token / cost limits |
 | `guardrun.config` | Strict `guardrun.toml` loader |
 | `guardrun.sessions` | Save and resume conversations |
+| `guardrun.mission` | Planner, worker, and inspector roles; the supervisor loop; mission store and inbox ([Missions](missions.md)) |
 | `guardrun.cli` | The `guardrun` command |
 
 The safety package never imports the agent loop, and only `safety.gate`

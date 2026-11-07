@@ -75,6 +75,18 @@ Use `guardrun policy "<command>"` to see how a command would be treated.
 | `parallel_reads` | boolean | `true` | Run a turn's read-only, approval-free calls concurrently |
 | `max_tool_output_chars` | integer | `50000` | Longest tool result sent to the model; the middle of longer output is elided |
 
+## `[mission]`
+
+Settings for [`guardrun mission`](missions.md).
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `max_attempts` | integer | `3` | How many times the inspector may send a task back before it is reported as failed |
+| `max_tasks` | integer | `20` | Most tasks a planner may publish (at most 50) |
+| `max_cost_usd` | number | none | Cost cap for a whole mission, across planner, workers, and inspector |
+
+`[budget]` still applies to each individual agent run within a mission.
+
 ## `[network]`
 
 | Key | Type | Default | Meaning |
@@ -108,6 +120,10 @@ block = ["docker"]
 [budget]
 max_turns = 40
 max_cost_usd = 5.0
+
+[mission]
+max_attempts = 3
+max_cost_usd = 30.0
 
 [network]
 enabled = true

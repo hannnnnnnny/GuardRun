@@ -29,6 +29,8 @@ else:  # pragma: no cover - exercised on 3.10 CI only
     import tomli as tomllib
 
 CONFIG_FILENAME = "guardrun.toml"
+# Same as guardrun.mission.plan.MAX_TASKS; importing it here would create a cycle.
+MAX_MISSION_TASKS = 50
 PROVIDER_DEFAULT_MODELS = {"deepseek": DEFAULT_DEEPSEEK_MODEL, "anthropic": DEFAULT_MODEL}
 
 
@@ -56,6 +58,9 @@ class Config:
     max_identical_calls: int = DEFAULT_MAX_IDENTICAL_CALLS
     parallel_reads: bool = True
     max_tool_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS
+    mission_max_attempts: int = 3
+    mission_max_tasks: int = 20
+    mission_max_cost_usd: float | None = None
     source: Path | None = field(default=None, compare=False)
 
     @property
@@ -73,6 +78,7 @@ _SCHEMA: dict[str, set[str]] = {
         "budget",
         "network",
         "limits",
+        "mission",
     },
     "model": {"provider", "name", "effort", "max_tokens"},
     "safety": {"mode", "protect", "unprotect", "audit"},
@@ -85,6 +91,7 @@ _SCHEMA: dict[str, set[str]] = {
         "parallel_reads",
         "max_tool_output_chars",
     },
+    "mission": {"max_attempts", "max_tasks", "max_cost_usd"},
 }
 
 
@@ -195,6 +202,20 @@ def _limits_fields(section: dict[str, Any]) -> dict[str, Any]:
     return fields
 
 
+def _mission_fields(section: dict[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    for key in ("max_attempts", "max_tasks"):
+        if key in section:
+            value = _positive(_expect(section[key], int, f"mission.{key}"), f"mission.{key}")
+            if key == "max_tasks" and value > MAX_MISSION_TASKS:
+                raise ConfigError(f"mission.max_tasks may be at most {MAX_MISSION_TASKS}")
+            fields[f"mission_{key}"] = int(value)
+    if "max_cost_usd" in section:
+        cost = _positive(section["max_cost_usd"], "mission.max_cost_usd")
+        fields["mission_max_cost_usd"] = float(cost)
+    return fields
+
+
 def parse_config(data: dict[str, Any], source: Path | None = None) -> Config:
     _check_keys(data, "")
     fields: dict[str, Any] = {}
@@ -204,6 +225,7 @@ def parse_config(data: dict[str, Any], source: Path | None = None) -> Config:
     fields.update(_budget_fields(_section(data, "budget")))
     fields.update(_network_fields(_section(data, "network")))
     fields.update(_limits_fields(_section(data, "limits")))
+    fields.update(_mission_fields(_section(data, "mission")))
     for key in ("instructions", "instructions_file"):
         if key in data:
             fields[key] = _expect(data[key], str, key)
