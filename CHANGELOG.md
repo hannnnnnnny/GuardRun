@@ -6,7 +6,16 @@ All notable changes to GuardRun are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-08
+
+Missions: AI plans, does, and inspects a large goal on its own, and tells you
+only what needs a human. First release with a standalone Windows executable.
+
 ### Added
+- Windows executable (`guardrun-<version>-windows-x64.exe`, with a `.sha256`
+  file) attached to every GitHub release; no Python install required. Built
+  with PyInstaller by `packaging/build_exe.py` and smoke-tested in the release
+  workflow.
 - Missions: `guardrun mission plan|import|run|status` turns a large goal into
   tasks and works through them unattended. A read-only planner publishes the
   tasks, workers do them, and a read-only inspector checks each result against
@@ -73,5 +82,6 @@ settings and sessions.
 - CI on Linux, macOS, and Windows for Python 3.10 to 3.14, a 95% coverage floor,
   CodeQL, and Dependabot.
 
-[Unreleased]: https://github.com/hannnnnnnny/GuardRun/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/hannnnnnnny/GuardRun/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/hannnnnnnny/GuardRun/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/hannnnnnnny/GuardRun/releases/tag/v0.1.0

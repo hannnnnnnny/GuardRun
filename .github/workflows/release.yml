@@ -28,8 +28,29 @@ jobs:
           name: dist
           path: dist/
 
+  windows-exe:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install . pyinstaller
+      - run: python packaging/build_exe.py
+      - name: Smoke-test the executable
+        shell: bash
+        run: |
+          exe=$(ls dist/guardrun-*-windows-x64.exe)
+          test "$("$exe" --version)" = "guardrun ${GITHUB_REF_NAME#v}"
+          "$exe" policy "rm -rf build"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-exe
+          path: dist/guardrun-*-windows-x64.exe*
+
   github-release:
-    needs: build
+    needs: [build, windows-exe]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -38,6 +59,10 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: dist
+          path: dist/
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-exe
           path: dist/
       - name: Create the GitHub release with the built distributions
         env:
