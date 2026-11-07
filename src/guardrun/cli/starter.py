@@ -39,6 +39,13 @@ max_calls_per_turn = 25
 max_identical_calls = 3
 parallel_reads = true
 
+[mission]
+# Used by `guardrun mission`: how often the inspector may send a task back,
+# how many tasks the planner may publish, and a cost cap for a whole mission.
+max_attempts = 3
+max_tasks = 20
+# max_cost_usd = 20.0
+
 [network]
 # Enables the web_fetch tool. Private, local, and metadata addresses are never reachable.
 enabled = false
