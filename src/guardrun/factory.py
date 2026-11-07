@@ -45,6 +45,8 @@ class AgentOptions:
     budget: Budget = field(default_factory=Budget)
     command_policy: CommandPolicy = field(default_factory=CommandPolicy)
     protected: ProtectedPaths = field(default_factory=ProtectedPaths)
+    # Replaces the built-in tool set when given (e.g. read-only tools for a reviewer).
+    tools: list[Tool] | None = None
     extra_tools: list[Tool] = field(default_factory=list)
     # Project-specific checks, run after the built-in SafetyGate has allowed a call.
     extra_gates: list[Gate] = field(default_factory=list)
@@ -69,7 +71,8 @@ def build_agent(root: Path | str, provider: Provider, options: AgentOptions | No
     injection_filter = make_injection_filter(
         lambda phrase: opts.events.emit("injection_suspected", phrase=phrase)
     )
-    tools = ToolRegistry([*default_tools(opts.command_policy), *opts.extra_tools])
+    base = default_tools(opts.command_policy) if opts.tools is None else opts.tools
+    tools = ToolRegistry([*base, *opts.extra_tools])
     gate = SafetyGate(ctx, opts.mode, opts.approver, opts.events)
     return Agent(
         provider,
