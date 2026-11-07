@@ -31,6 +31,29 @@ Interactive session with the same flags as `run`. Each message continues the
 conversation; `/exit` or end-of-file quits. The session id is printed after
 every reply.
 
+## `guardrun mission`
+
+Long, unattended work: AI publishes tasks, does them, and inspects them. See
+[Missions](missions.md).
+
+| Command | Meaning |
+|---|---|
+| `mission plan GOAL [--run]` | The planner explores the workspace and publishes tasks; `--run` starts right away |
+| `mission import FILE [--run]` | Create a mission from a TOML or JSON plan file |
+| `mission run ID [--retry]` | Run or resume a mission; `--retry` requeues failed, escalated, and skipped tasks |
+| `mission status [ID] [-v]` | List missions, or show one with every task's status (`-v` adds criteria and checks) |
+
+`plan`, `import`, and `run` accept `--provider`, `--model`, `--effort`,
+`--max-cost USD` (cap for the whole mission), `--max-attempts N` (QA rounds
+per task), `--no-audit`, and `-v` (show every tool call). They never prompt.
+Exit code `0` means every task passed.
+
+## `guardrun inbox`
+
+What missions need you to look at, oldest first: blockers (escalations, tasks
+that failed inspection, spent budgets) and warnings (suspected prompt
+injection). `-n N` controls how many entries.
+
 ## `guardrun sessions`
 
 List saved sessions, newest first: id, last update, message count, and title.
