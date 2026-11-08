@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from guardrun.safety.process import default_shell, run_command
+from guardrun.safety.process import default_shell, find_posix_shell, run_command
 
 PY = sys.executable.replace("\\", "/")
 
@@ -60,3 +60,49 @@ def test_environment_is_exactly_what_was_passed(tmp_path: Path) -> None:
 def test_stdin_is_closed(tmp_path: Path) -> None:
     result = run_command(f'"{PY}" -c "import sys; print(repr(sys.stdin.read()))"', tmp_path, _env())
     assert "''" in result.output
+
+
+def _exe(directory: Path, name: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / name).write_text("")
+    return directory / name
+
+
+def test_windows_skips_wsl_launchers_for_git_bash(tmp_path: Path) -> None:
+    windows = tmp_path / "Windows"
+    _exe(windows / "System32", "bash.exe")
+    _exe(tmp_path / "AppData" / "Local" / "Microsoft" / "WindowsApps", "bash.exe")
+    git_bash = _exe(tmp_path / "Git" / "usr" / "bin", "bash.exe")
+    path = os.pathsep.join(
+        [
+            str(windows / "System32"),
+            str(tmp_path / "AppData" / "Local" / "Microsoft" / "WindowsApps"),
+            str(git_bash.parent),
+        ]
+    )
+    env = {"PATH": path, "SYSTEMROOT": str(windows)}
+    assert find_posix_shell(env, windows=True) == str(git_bash)
+
+
+def test_windows_finds_git_bash_next_to_git_on_path(tmp_path: Path) -> None:
+    _exe(tmp_path / "Git" / "cmd", "git.exe")
+    bash = _exe(tmp_path / "Git" / "bin", "bash.exe")
+    env = {"PATH": str(tmp_path / "Git" / "cmd"), "SYSTEMROOT": str(tmp_path / "Windows")}
+    assert find_posix_shell(env, windows=True) == str(bash)
+
+
+def test_windows_finds_git_bash_in_program_files(tmp_path: Path) -> None:
+    bash = _exe(tmp_path / "Git" / "bin", "bash.exe")
+    env = {"PATH": "", "ProgramFiles": str(tmp_path), "SYSTEMROOT": str(tmp_path / "Windows")}
+    assert find_posix_shell(env, windows=True) == str(bash)
+
+
+def test_windows_with_only_wsl_finds_nothing(tmp_path: Path) -> None:
+    windows = tmp_path / "Windows"
+    _exe(windows / "System32", "bash.exe")
+    env = {"PATH": str(windows / "System32"), "SYSTEMROOT": str(windows)}
+    assert find_posix_shell(env, windows=True) is None
+
+
+def test_posix_lookup_uses_path(tmp_path: Path) -> None:
+    assert find_posix_shell({"PATH": str(tmp_path)}, windows=False) is None
