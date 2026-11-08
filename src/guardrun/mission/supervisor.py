@@ -135,10 +135,14 @@ class Supervisor:
         planner = self.make_agent(Role.PLANNER, [publish])
         result = planner.run(planner_prompt(goal, self.settings.max_tasks))
         if publish.tasks is None:
+            # No mission exists to file a warning under; don't pin these on a later task.
+            self._suspicions.clear()
             why = result.detail or result.text.strip()[:300] or "no plan was published"
             raise PlanError(f"the planner did not publish a plan ({result.stop}: {why})")
         mission = Mission(goal=goal, tasks=publish.tasks, cost_usd=result.cost_usd or 0.0)
         self.store.save(mission)
+        # The planner reads the project too, so its findings must reach the user.
+        self._report_suspicions(mission, "")
         self.events.emit("mission_planned", mission=mission.id, tasks=len(mission.tasks))
         return mission
 
@@ -190,12 +194,21 @@ class Supervisor:
         return None
 
     def _run_task(self, mission: Mission, task: Task) -> None:
+        try:
+            self._work_on(mission, task)
+        finally:
+            # Also when the budget stops the task early: warnings must not be lost.
+            self._report_suspicions(mission, task.id)
+
+    def _work_on(self, mission: Mission, task: Task) -> None:
         escalate = Escalate()
         worker = self.make_agent(Role.WORKER, [escalate])
         prompt = worker_prompt(mission, task)
         if task.attempts and not task.attempts[-1].passed:
             prompt += "\n\n" + rework_prompt(task.attempts[-1].feedback)
-        for _ in range(self.settings.max_attempts):
+        # Attempts made before an interruption count, so resuming doesn't reset the limit.
+        used = len(task.attempts) - task.round_start
+        for _ in range(max(self.settings.max_attempts - used, 0)):
             self.events.emit(
                 "task_started", task=task.id, title=task.title, attempt=len(task.attempts) + 1
             )
@@ -210,7 +223,6 @@ class Supervisor:
             reason = f"failed inspection {self.settings.max_attempts} times. Last feedback: {last}"
             self._settle(task, TaskStatus.FAILED, reason)
             self._notify(mission, task.id, BLOCKER, reason)
-        self._report_suspicions(mission, task)
 
     def _attempt(
         self, mission: Mission, task: Task, worker: Agent, escalate: Escalate, prompt: str
@@ -302,11 +314,11 @@ class Supervisor:
         if event.kind == "injection_suspected":
             self._suspicions.append(str(event.data.get("phrase", "")))
 
-    def _report_suspicions(self, mission: Mission, task: Task) -> None:
+    def _report_suspicions(self, mission: Mission, task_id: str) -> None:
         if self._suspicions:
             phrases = ", ".join(repr(p) for p in sorted(set(self._suspicions))[:5])
             self._notify(
-                mission, task.id, WARNING, f"possible prompt injection in tool output: {phrases}"
+                mission, task_id, WARNING, f"possible prompt injection in tool output: {phrases}"
             )
             self._suspicions.clear()
 
@@ -325,11 +337,13 @@ def _checks_failed(results: list[CheckResult]) -> str:
 
 
 def reopen(mission: Mission) -> int:
-    """Put failed, escalated, and skipped tasks back in the queue; returns how many."""
+    """Put failed, escalated, and skipped tasks back in the queue, each with a fresh
+    set of attempts; returns how many."""
     reopened = 0
     for task in mission.tasks:
         if task.status in _UNFINISHED:
             task.status = TaskStatus.PENDING
             task.note = ""
+            task.round_start = len(task.attempts)
             reopened += 1
     return reopened

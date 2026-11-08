@@ -213,7 +213,11 @@ def cmd_mission(args: argparse.Namespace, config: Config, io: IO, factory: Provi
     supervisor = build_supervisor(args, config, io, factory)
     if args.mission_command == "plan":
         io.stdout.write("planning...\n")
-        planned = supervisor.plan(args.goal)
+        try:
+            planned = supervisor.plan(args.goal)
+        except KeyboardInterrupt:
+            io.stdout.write("\ninterrupted; nothing was saved\n")
+            return EXIT_INCOMPLETE
         return _created(planned, lambda: _execute(supervisor, planned, io), args, io)
     mission = supervisor.store.load(args.mission_id)
     if args.retry:
