@@ -223,3 +223,15 @@ def test_import_and_run(tmp_path: Path) -> None:
     )
     assert code == EXIT_OK, term.out
     assert "status: done" in term.out
+
+
+def test_interrupted_planning_exits_cleanly(tmp_path: Path) -> None:
+    term = Term()
+    code = main(
+        ["mission", "plan", "Add a CLI", "-w", str(tmp_path)],
+        io=term.io,
+        provider_factory=lambda config: Interrupting([]),
+    )
+    assert code == EXIT_INCOMPLETE
+    assert "interrupted; nothing was saved" in term.out
+    assert store(tmp_path).list_missions() == []

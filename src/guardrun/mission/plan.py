@@ -62,6 +62,8 @@ class Task:
     status: TaskStatus = TaskStatus.PENDING
     attempts: list[Attempt] = field(default_factory=list)
     note: str = ""
+    # Attempts before this index belong to earlier rounds (before a ``--retry``).
+    round_start: int = 0
 
 
 def _now() -> str:

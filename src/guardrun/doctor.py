@@ -7,7 +7,6 @@ be safe to run and paste into a bug report.
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -16,6 +15,7 @@ from pathlib import Path
 from guardrun.config import Config, load_config
 from guardrun.errors import ConfigError
 from guardrun.providers.deepseek import API_KEY_ENV as DEEPSEEK_KEY_ENV
+from guardrun.safety.process import find_posix_shell
 
 OK, WARN, FAIL = "ok", "warn", "fail"
 
@@ -54,11 +54,10 @@ def check_credentials(environ: Mapping[str, str], home: Path, provider: str = "a
     )
 
 
-def check_shell(which: Callable[[str], str | None] = shutil.which) -> Check:
-    for name in ("bash", "sh"):
-        path = which(name)
-        if path:
-            return Check("shell", OK, f"{name} at {path}")
+def check_shell(find: Callable[[], str | None] = find_posix_shell) -> Check:
+    path = find()
+    if path:
+        return Check("shell", OK, f"{Path(path).stem} at {path}")
     return Check(
         "shell",
         WARN,

@@ -35,8 +35,10 @@ def test_missing_credentials_warn(tmp_path: Path) -> None:
 
 
 def test_shell_check() -> None:
-    assert check_shell(lambda name: "/bin/bash" if name == "bash" else None).status == OK
-    assert check_shell(lambda name: None).status == WARN
+    found = check_shell(lambda: "/bin/bash")
+    assert found.status == OK
+    assert found.detail == "bash at /bin/bash"
+    assert check_shell(lambda: None).status == WARN
 
 
 def test_config_check(tmp_path: Path) -> None:
