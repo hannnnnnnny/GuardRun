@@ -6,6 +6,20 @@ All notable changes to GuardRun are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-26
+
+### Fixed
+- Windows: shell commands and mission checks failed whenever GuardRun (or the
+  `.exe`) was started from PowerShell or cmd, because `bash` resolved to the
+  WSL launcher in `System32`. GuardRun now skips the WSL launchers and uses Git
+  Bash; `guardrun doctor` reports the shell it will really use.
+- Missions: prompt-injection warnings raised while planning now reach the
+  inbox (they were dropped, or filed under the first task).
+- Missions: a task stopped by the budget still reports its injection warnings.
+- Missions: resuming no longer resets a task's QA attempt limit; only
+  `mission run --retry` starts a new round.
+- `mission plan` exits cleanly on Ctrl+C instead of printing a traceback.
+
 ## [0.2.0] - 2026-11-08
 
 Missions: AI plans, does, and inspects a large goal on its own, and tells you
@@ -82,6 +96,7 @@ settings and sessions.
 - CI on Linux, macOS, and Windows for Python 3.10 to 3.14, a 95% coverage floor,
   CodeQL, and Dependabot.
 
-[Unreleased]: https://github.com/hannnnnnnny/GuardRun/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/hannnnnnnny/GuardRun/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/hannnnnnnny/GuardRun/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/hannnnnnnny/GuardRun/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/hannnnnnnny/GuardRun/releases/tag/v0.1.0
