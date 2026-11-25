@@ -6,6 +6,7 @@ import pytest
 
 from guardrun.cli.main import EXIT_INCOMPLETE, EXIT_OK, EXIT_USAGE, main
 from guardrun.cli.mission import MAX_PLAN_FILE_BYTES, MissionRenderer, read_plan_file
+from guardrun.cli.style import Style
 from guardrun.events import Event
 from guardrun.messages import ModelResponse
 from guardrun.mission import Inbox, MissionStore, TaskStatus, mission_from_plan
@@ -54,7 +55,7 @@ def test_plan_and_run_in_one_go(tmp_path: Path) -> None:
     assert code == EXIT_OK, term.err
     assert "published 1 tasks" in term.out
     assert "$ echo ok" in term.out
-    assert "== a: Task a (attempt 1)" in term.out
+    assert "[1/1] a: Task a attempt 1" in term.out
     assert "QA passed: checked out.txt" in term.out
     assert "status: done" in term.out
     assert (tmp_path / "out.txt").exists()
@@ -150,7 +151,7 @@ def test_status_lists_and_shows_missions(tmp_path: Path) -> None:
 
 def test_inbox(tmp_path: Path) -> None:
     code, term, _ = run_cli(tmp_path, "inbox")
-    assert "nothing needs you" in term.out
+    assert "nothing new needs you" in term.out
     inbox = Inbox(tmp_path / ".guardrun" / "inbox.jsonl")
     inbox.post("abc", "t1", "blocker", "need a decision")
     inbox.post("abc", "", "warning", "budget")
@@ -159,7 +160,44 @@ def test_inbox(tmp_path: Path) -> None:
     assert "abc/t1" in term.out
     assert "need a decision" in term.out
     code, term, _ = run_cli(tmp_path, "inbox", "-n", "0")
-    assert "nothing needs you" in term.out
+    assert "nothing new needs you" in term.out
+
+
+def test_inbox_tracks_what_is_new(tmp_path: Path) -> None:
+    inbox = Inbox(tmp_path / ".guardrun" / "inbox.jsonl")
+    inbox.post("abc", "t1", "blocker", "need a decision")
+    inbox.post("abc", "t2", "warning", "odd file")
+    _, term, _ = run_cli(tmp_path, "inbox")
+    assert term.out.count("new ") == 2
+    assert "guardrun inbox --ack" in term.out
+    _, term, _ = run_cli(tmp_path, "inbox", "--ack")
+    assert "marked 2 as read" in term.out
+    _, term, _ = run_cli(tmp_path, "inbox")
+    assert "nothing new needs you (2 read" in term.out
+    inbox.post("abc", "t3", "blocker", "stuck again")
+    _, term, _ = run_cli(tmp_path, "inbox")
+    assert "stuck again" in term.out
+    assert "need a decision" not in term.out
+    _, term, _ = run_cli(tmp_path, "inbox", "--all")
+    assert "need a decision" in term.out
+    assert term.out.count("new ") == 1
+
+
+def test_notify_command_runs_for_inbox_notices(tmp_path: Path) -> None:
+    config = (
+        "[mission]\n"
+        'notify_command = \'printf "%s %s" "$GUARDRUN_NOTICE_LEVEL" '
+        '"$GUARDRUN_NOTICE_TASK" > notified.txt\'\n'
+    )
+    (tmp_path / "guardrun.toml").write_text(config)
+    plan = {"goal": "g", "tasks": [task("a", checks=["sudo make install"])]}
+    (tmp_path / "plan.json").write_text(json.dumps(plan))
+    code, term, _ = run_cli(
+        tmp_path, "mission", "import", str(tmp_path / "plan.json"), "--run", turns=work()
+    )
+    assert code == EXIT_INCOMPLETE, term.err
+    assert (tmp_path / "notified.txt").read_text() == "blocker a"
+    assert "1 new in your inbox" in term.out
 
 
 class Interrupting(ScriptedProvider):
@@ -191,6 +229,22 @@ def test_verbose_renderer_shows_agent_tool_calls() -> None:
     assert "> read_file" in term.out
     assert "ignored" not in term.out
     assert "[warning] hmm" in term.out
+
+
+def test_renderer_shows_outages_and_rings_on_blockers() -> None:
+    term = Term()
+    renderer = MissionRenderer(term.io.stdout, style=Style(True))
+    waiting = {"seconds": 120, "retry": 2, "retries": 6, "detail": "API error 529"}
+    renderer(Event("service_waiting", waiting))
+    renderer(Event("inbox_posted", {"task": "t", "level": "blocker", "reason": "stuck"}))
+    assert "model service unavailable" in term.out
+    assert "retry 2/6 in 2 min" in term.out
+    assert "\a" in term.out
+    assert "\033[" in term.out
+    plain = Term()
+    MissionRenderer(plain.io.stdout)(Event("inbox_posted", {"level": "blocker", "reason": "x"}))
+    assert "\a" not in plain.out
+    assert "\033[" not in plain.out
 
 
 def test_example_week_plan_is_valid() -> None:

@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
 from guardrun.cli.render import ConsoleRenderer
+from guardrun.cli.style import PLAIN, Style
 from guardrun.config import PROVIDER_DEFAULT_MODELS, Config
 from guardrun.events import Event, EventBus
 from guardrun.factory import STATE_DIR, options_from_config
 from guardrun.mission.checks import CheckRunner
 from guardrun.mission.inbox import BLOCKER, Inbox, Notice
+from guardrun.mission.notify import CommandNotifier
 from guardrun.mission.plan import Mission, PlanError, mission_from_plan
 from guardrun.mission.report import mission_line, mission_report
 from guardrun.mission.store import MissionStore
@@ -54,6 +56,14 @@ def _add_mission_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-v", "--verbose", action="store_true", help="show every tool call")
 
 
+def _add_inbox_parser(sub: Any) -> None:
+    inbox = sub.add_parser("inbox", help="what missions need you to look at")
+    inbox.add_argument("-n", "--tail", type=int, default=20, help="show at most this many")
+    inbox.add_argument("-a", "--all", action="store_true", help="include notices already read")
+    inbox.add_argument("--ack", action="store_true", help="mark every notice as read")
+    inbox.add_argument("-w", "--workspace", type=Path, default=Path.cwd())
+
+
 def add_parsers(sub: Any) -> None:
     """Register ``mission`` (with its subcommands) and ``inbox``."""
     mission = sub.add_parser("mission", help="plan a goal into tasks, run them, inspect results")
@@ -74,9 +84,7 @@ def add_parsers(sub: Any) -> None:
     status.add_argument("mission_id", nargs="?")
     status.add_argument("-v", "--verbose", action="store_true", help="show criteria and checks")
     status.add_argument("-w", "--workspace", type=Path, default=Path.cwd())
-    inbox = sub.add_parser("inbox", help="what missions need you to look at")
-    inbox.add_argument("-n", "--tail", type=int, default=20)
-    inbox.add_argument("-w", "--workspace", type=Path, default=Path.cwd())
+    _add_inbox_parser(sub)
 
 
 def _store(workspace: Path) -> MissionStore:
@@ -87,44 +95,79 @@ def _inbox(workspace: Path) -> Inbox:
     return Inbox(workspace / STATE_DIR / "inbox.jsonl", Redactor.from_environment(os.environ))
 
 
-class MissionRenderer:
-    """Mission-level progress lines; agent tool calls only when verbose."""
-
-    def __init__(self, out: TextIO, verbose: bool = False) -> None:
-        self.out = out
-        self.tools = ConsoleRenderer(out) if verbose else None
-
-    def __call__(self, event: Event) -> None:
-        line = _describe(event)
-        if line is not None:
-            self.out.write(line + "\n")
-            self.out.flush()
-        elif self.tools is not None and "role" in event.data:
-            self.tools(event)
-
-
 def _short(text: str, limit: int = 200) -> str:
     flat = " ".join(str(text).split())
     return flat if len(flat) <= limit else flat[: limit - 3] + "..."
 
 
-def _describe(event: Event) -> str | None:
-    d = event.data
-    if event.kind == "mission_planned":
-        return f"published {d['tasks']} tasks as mission {d['mission']}"
-    if event.kind == "task_started":
-        return f"\n== {d['task']}: {d['title']} (attempt {d['attempt']})"
-    if event.kind == "task_reviewed":
-        verdict = "passed" if d["passed"] else "sent back"
-        return f"   QA {verdict}: {_short(d['feedback'])}"
-    if event.kind == "task_finished":
-        # A pass was just shown by the QA line; other endings need their reason.
-        note = "" if d["status"] == "passed" else f": {_short(d['note'], 120)}"
-        return f"   -> {d['status']}{note}"
-    if event.kind == "inbox_posted":
-        label = "needs you" if d["level"] == BLOCKER else d["level"]
-        return f"   [{label}] {_short(d['reason'], 300)}"
-    return None
+def _duration(seconds: float) -> str:
+    return f"{seconds:.0f}s" if seconds < 60 else f"{seconds / 60:.0f} min"
+
+
+def _task_started(d: dict[str, Any], s: Style) -> str:
+    where = f"[{d['position']}/{d['total']}] " if "position" in d else ""
+    head = s.bold(f"{where}{d['task']}: {d['title']}")
+    spent = f" · ${d['spent_usd']:.2f} spent" if "spent_usd" in d else ""
+    detail = s.dim(f"attempt {d['attempt']}{spent}")
+    return f"\n{head} {detail}"
+
+
+def _task_reviewed(d: dict[str, Any], s: Style) -> str:
+    verdict = s.ok("QA passed") if d["passed"] else s.warn("QA sent back")
+    return f"   {verdict}: {_short(d['feedback'])}"
+
+
+def _task_finished(d: dict[str, Any], s: Style) -> str:
+    status = d["status"]
+    paint = {"passed": s.ok, "skipped": s.warn}.get(status, s.error)
+    # A pass was just shown by the QA line; other endings need their reason.
+    note = "" if status == "passed" else f": {_short(d['note'], 120)}"
+    return f"   -> {paint(status)}{note}"
+
+
+def _inbox_posted(d: dict[str, Any], s: Style) -> str:
+    label = s.error("[needs you]") if d["level"] == BLOCKER else s.warn(f"[{d['level']}]")
+    return f"   {label} {_short(d['reason'], 300)}"
+
+
+def _service_waiting(d: dict[str, Any], s: Style) -> str:
+    retry = f"retry {d['retry']}/{d['retries']} in {_duration(d['seconds'])}"
+    return f"   {s.warn('model service unavailable')}: {_short(d['detail'], 120)} {s.dim(retry)}"
+
+
+_LINES: dict[str, Callable[[dict[str, Any], Style], str]] = {
+    "mission_planned": lambda d, s: f"published {d['tasks']} tasks as mission {d['mission']}",
+    "task_started": _task_started,
+    "task_reviewed": _task_reviewed,
+    "task_finished": _task_finished,
+    "inbox_posted": _inbox_posted,
+    "service_waiting": _service_waiting,
+}
+
+
+def describe(event: Event, style: Style = PLAIN) -> str | None:
+    line = _LINES.get(event.kind)
+    return line(event.data, style) if line is not None else None
+
+
+class MissionRenderer:
+    """Mission-level progress lines; agent tool calls only when verbose."""
+
+    def __init__(self, out: TextIO, verbose: bool = False, style: Style = PLAIN) -> None:
+        self.out = out
+        self.style = style
+        self.tools = ConsoleRenderer(out, style=style) if verbose else None
+
+    def __call__(self, event: Event) -> None:
+        line = describe(event, self.style)
+        if line is not None:
+            # On a terminal, a blocker also rings the bell for whoever is nearby.
+            bell = self.style.enabled and event.kind == "inbox_posted"
+            bell = bell and event.data.get("level") == BLOCKER
+            self.out.write(line + ("\a" if bell else "") + "\n")
+            self.out.flush()
+        elif self.tools is not None and "role" in event.data:
+            self.tools(event)
 
 
 def _settings(config: Config, args: argparse.Namespace) -> MissionSettings:
@@ -135,18 +178,32 @@ def _settings(config: Config, args: argparse.Namespace) -> MissionSettings:
             max_attempts=attempts if attempts is not None else config.mission_max_attempts,
             max_tasks=config.mission_max_tasks,
             max_cost_usd=cost if cost is not None else config.mission_max_cost_usd,
+            outage_retries=config.mission_outage_retries,
+            outage_wait_seconds=config.mission_outage_wait_seconds,
         )
     except ValueError as exc:
         raise PlanError(f"invalid mission settings: {exc}") from exc
+
+
+def _mission_inbox(args: argparse.Namespace, config: Config, io: IO) -> Inbox:
+    inbox = _inbox(args.workspace)
+    if config.mission_notify_command:
+
+        def report(message: str) -> None:
+            io.stderr.write(io.style.warn(f"guardrun: {message}") + "\n")
+
+        notifier = CommandNotifier(config.mission_notify_command, args.workspace, report)
+        inbox.notifiers.append(notifier)
+    return inbox
 
 
 def build_supervisor(
     args: argparse.Namespace, config: Config, io: IO, factory: ProviderFactory
 ) -> Supervisor:
     events = EventBus()
-    events.subscribe(MissionRenderer(io.stdout, verbose=args.verbose))
+    events.subscribe(MissionRenderer(io.stdout, args.verbose, io.style))
     options = options_from_config(config, deny_all, root=args.workspace)
-    inbox = _inbox(args.workspace)
+    inbox = _mission_inbox(args, config, io)
     checks = CheckRunner(args.workspace, options.command_policy, options.protected, inbox.redactor)
     return Supervisor(
         agent_maker(args.workspace, factory(config), options, events),
@@ -167,9 +224,9 @@ def _execute(supervisor: Supervisor, mission: Mission, io: IO) -> int:
         io.stdout.write(f"\ninterrupted; resume with: guardrun mission run {mission.id}\n")
         return EXIT_INCOMPLETE
     io.stdout.write("\n" + mission_report(mission) + "\n")
-    blockers = mission.counts()["failed"] + mission.counts()["escalated"]
-    if blockers:
-        io.stdout.write("see `guardrun inbox` for what needs you\n")
+    _, unread = supervisor.inbox.unread()
+    if unread:
+        io.stdout.write(io.style.warn(f"{len(unread)} new in your inbox: guardrun inbox") + "\n")
     return EXIT_OK if mission.status == "done" else EXIT_INCOMPLETE
 
 
@@ -238,16 +295,28 @@ def cmd_mission_status(args: argparse.Namespace, io: IO) -> int:
     return EXIT_OK
 
 
-def _format_notice(notice: Notice) -> str:
+def _format_notice(notice: Notice, new: bool, style: Style) -> str:
     where = f"{notice.mission}/{notice.task}" if notice.task else notice.mission
-    return f"{notice.ts[:19]}  {notice.level:8} {where}\n    {notice.reason}"
+    paint = style.error if notice.level == BLOCKER else style.warn
+    level = paint(f"{notice.level:8}")
+    mark = style.accent("new ") if new else "    "
+    return f"{mark}{style.dim(notice.ts[:19])}  {level} {where}\n        {notice.reason}"
 
 
 def cmd_inbox(args: argparse.Namespace, io: IO) -> int:
-    notices = _inbox(args.workspace).read()
-    shown = notices[-args.tail :] if args.tail > 0 else []
+    inbox = _inbox(args.workspace)
+    read, unread = inbox.unread()
+    pool = [(n, False) for n in read] + [(n, True) for n in unread] if args.all else []
+    pool = pool or [(n, True) for n in unread]
+    shown = pool[-args.tail :] if args.tail > 0 else []
     if not shown:
-        io.stdout.write("inbox is empty: nothing needs you\n")
-    for notice in shown:
-        io.stdout.write(_format_notice(notice) + "\n")
+        earlier = f" ({len(read)} read; see them with: guardrun inbox --all)" if read else ""
+        io.stdout.write(f"nothing new needs you{earlier}\n")
+    for notice, new in shown:
+        io.stdout.write(_format_notice(notice, new, io.style) + "\n")
+    if args.ack and unread:
+        inbox.mark_seen(len(read) + len(unread))
+        io.stdout.write(io.style.dim(f"marked {len(unread)} as read") + "\n")
+    elif unread and shown:
+        io.stdout.write(io.style.dim("when handled: guardrun inbox --ack") + "\n")
     return EXIT_OK
