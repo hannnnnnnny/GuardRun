@@ -113,21 +113,25 @@ def _status_error(cls: type[anthropic.APIStatusError], status: int) -> anthropic
 
 
 @pytest.mark.parametrize(
-    ("error", "message"),
+    ("error", "message", "transient"),
     [
-        (_status_error(anthropic.AuthenticationError, 401), "authentication failed"),
-        (_status_error(anthropic.RateLimitError, 429), "rate limited"),
-        (_status_error(anthropic.BadRequestError, 400), "rejected the request"),
-        (_status_error(anthropic.InternalServerError, 500), "API error 500"),
+        (_status_error(anthropic.AuthenticationError, 401), "authentication failed", False),
+        (_status_error(anthropic.RateLimitError, 429), "rate limited", True),
+        (_status_error(anthropic.BadRequestError, 400), "rejected the request", False),
+        (_status_error(anthropic.InternalServerError, 500), "API error 500", True),
+        (_status_error(anthropic.APIStatusError, 529), "API error 529", True),
+        (_status_error(anthropic.APIStatusError, 404), "API error 404", False),
     ],
 )
-def test_api_errors_become_provider_errors(error: Exception, message: str) -> None:
-    with pytest.raises(ProviderError, match=message):
+def test_api_errors_become_provider_errors(error: Exception, message: str, transient: bool) -> None:
+    with pytest.raises(ProviderError, match=message) as caught:
         AnthropicProvider(client=FakeClient(error)).complete(REQUEST)
+    assert caught.value.transient is transient
 
 
 def test_connection_errors_become_provider_errors() -> None:
     request = httpx2.Request("POST", "https://api.anthropic.com")
     error = anthropic.APIConnectionError(request=request)
-    with pytest.raises(ProviderError, match="could not reach"):
+    with pytest.raises(ProviderError, match="could not reach") as caught:
         AnthropicProvider(client=FakeClient(error)).complete(REQUEST)
+    assert caught.value.transient

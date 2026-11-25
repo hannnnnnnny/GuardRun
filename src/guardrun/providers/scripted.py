@@ -34,11 +34,14 @@ def tool_turn(*calls: tuple[str, dict[str, Any]], text: str = "") -> ModelRespon
 
 
 class ScriptedProvider:
-    """Returns the queued responses in order and records every request."""
+    """Returns the queued responses in order and records every request.
+
+    A queued :class:`ProviderError` is raised instead, to script outages.
+    """
 
     model = "scripted"
 
-    def __init__(self, responses: Iterable[ModelResponse]) -> None:
+    def __init__(self, responses: Iterable[ModelResponse | ProviderError]) -> None:
         self._responses = list(responses)
         self.requests: list[ModelRequest] = []
 
@@ -46,4 +49,7 @@ class ScriptedProvider:
         self.requests.append(request)
         if not self._responses:
             raise ProviderError("scripted provider ran out of responses")
-        return self._responses.pop(0)
+        response = self._responses.pop(0)
+        if isinstance(response, ProviderError):
+            raise response
+        return response

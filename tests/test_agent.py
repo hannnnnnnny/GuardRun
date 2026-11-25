@@ -168,6 +168,41 @@ def test_provider_errors_other_than_exhaustion_are_reported(tmp_path: Path) -> N
     agent = Agent(Broken(), ToolRegistry(file_tools()), ToolContext.for_root(tmp_path))
     result = agent.run("x")
     assert result.detail == "authentication failed"
+    assert not result.retryable
+
+
+class Flaky:
+    """Fails with an outage first, then answers."""
+
+    model = "m"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        self.calls += 1
+        if self.calls == 1:
+            raise ProviderError("overloaded", transient=True)
+        return text_turn("done")
+
+
+def test_outage_can_be_resumed_without_repeating_the_task(tmp_path: Path) -> None:
+    agent = Agent(Flaky(), ToolRegistry(file_tools()), ToolContext.for_root(tmp_path))
+    first = agent.run("do it")
+    assert first.stop == "error"
+    assert first.retryable
+    second = agent.resume()
+    assert second.ok
+    assert second.text == "done"
+    roles = [m["role"] for m in agent.conversation.messages]
+    assert roles == ["user", "assistant"]
+
+
+def test_resume_needs_a_pending_turn(tmp_path: Path) -> None:
+    agent = make_agent(tmp_path, [text_turn("hi")])
+    agent.run("hello")
+    with pytest.raises(ValueError, match="nothing to resume"):
+        agent.resume()
 
 
 @pytest.mark.parametrize("stop", ["completed", "refused", "budget", "stuck", "cancelled"])
