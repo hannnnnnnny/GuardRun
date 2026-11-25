@@ -6,6 +6,8 @@ All notable changes to GuardRun are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-26
+
 ### Added
 - Missions ride out model-service outages: rate limits, overload, server
   errors, and network trouble are retried with growing waits (30s up to 15
@@ -116,7 +118,8 @@ settings and sessions.
 - CI on Linux, macOS, and Windows for Python 3.10 to 3.14, a 95% coverage floor,
   CodeQL, and Dependabot.
 
-[Unreleased]: https://github.com/hannnnnnnny/GuardRun/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/hannnnnnnny/GuardRun/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/hannnnnnnny/GuardRun/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/hannnnnnnny/GuardRun/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/hannnnnnnny/GuardRun/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/hannnnnnnny/GuardRun/releases/tag/v0.1.0

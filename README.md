@@ -41,14 +41,14 @@ GuardRun runs shell commands with its Git Bash (`guardrun doctor` shows which
 shell it found). Each release also ships a `.sha256` file to verify the download:
 
 ```powershell
-(Get-FileHash .\guardrun-0.2.1-windows-x64.exe -Algorithm SHA256).Hash
+(Get-FileHash .\guardrun-0.3.0-windows-x64.exe -Algorithm SHA256).Hash
 ```
 
 **With Python 3.10+ (any OS):** install the wheel attached to the release, or
 from source:
 
 ```bash
-pip install guardrun-0.2.1-py3-none-any.whl   # from the release page
+pip install guardrun-0.3.0-py3-none-any.whl   # from the release page
 pip install -e ".[dev]"                       # from a checkout, for development
 ```
 
