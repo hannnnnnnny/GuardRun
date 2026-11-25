@@ -84,6 +84,9 @@ Settings for [`guardrun mission`](missions.md).
 | `max_attempts` | integer | `3` | How many times the inspector may send a task back before it is reported as failed |
 | `max_tasks` | integer | `20` | Most tasks a planner may publish (at most 50) |
 | `max_cost_usd` | number | none | Cost cap for a whole mission, across planner, workers, and inspector |
+| `outage_retries` | integer | `6` | How often to wait and retry when the model service is unavailable (`0` = never) |
+| `outage_wait_seconds` | number | `30` | First wait; it doubles on each retry, up to 15 minutes |
+| `notify_command` | string | none | Shell command run for every inbox notice; see [Missions](missions.md#notifications) |
 
 `[budget]` still applies to each individual agent run within a mission.
 

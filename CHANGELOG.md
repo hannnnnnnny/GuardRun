@@ -6,6 +6,26 @@ All notable changes to GuardRun are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Missions ride out model-service outages: rate limits, overload, server
+  errors, and network trouble are retried with growing waits (30s up to 15
+  min, `[mission] outage_retries` / `outage_wait_seconds`), continuing the same
+  conversation. A lasting outage pauses the mission with one inbox notice
+  instead of escalating every task. `Agent.resume()` and
+  `ProviderError.transient` support this.
+- `[mission] notify_command`: push every inbox notice to a phone, chat, or
+  desktop. The notice arrives in `GUARDRUN_NOTICE_*` environment variables.
+- `guardrun inbox` shows what is new; `--ack` marks notices read, `--all`
+  shows history. A mission run ends by saying how many notices are new.
+- Chat: a banner with model, mode, and workspace; `/help`, `/usage`,
+  `/session`, `/new`; Ctrl+C or Ctrl+D at the prompt leaves cleanly.
+- Mission progress shows `[2/5]` and the spending so far; blockers ring the
+  terminal bell.
+- Colour on interactive terminals (off when piped, with `NO_COLOR`, or
+  `TERM=dumb`; on with `FORCE_COLOR`).
+- `guardrun` with no command prints an overview of the main commands.
+- `doctor` explains that warnings don't stop GuardRun.
+
 ## [0.2.1] - 2026-11-26
 
 ### Fixed
