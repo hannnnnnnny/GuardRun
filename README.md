@@ -112,7 +112,12 @@ guardrun inbox                                         # what needs you
 ```
 
 Workers run in `unattended` mode, so your shell allowlist decides what they
-can execute; planners and inspectors are read-only. See [Missions](docs/missions.md).
+can execute; planners and inspectors are read-only.
+
+Built to run for days: when the model service has a bad half hour, the mission
+waits and continues where it stopped instead of giving up, and with
+`[mission] notify_command` a blocker can reach your phone (for example through
+ntfy.sh) the moment it happens. See [Missions](docs/missions.md).
 
 ## Approval modes
 

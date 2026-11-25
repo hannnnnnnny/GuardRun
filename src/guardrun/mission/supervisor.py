@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +41,7 @@ from guardrun.tools.builtin import read_only_tools
 # Run endings that retrying with feedback cannot fix.
 FATAL_STOPS = frozenset({"error", "refused", "cancelled"})
 MAX_SUMMARY_CHARS = 4000
+MAX_OUTAGE_WAIT_SECONDS = 900.0
 _UNFINISHED = (TaskStatus.FAILED, TaskStatus.ESCALATED, TaskStatus.SKIPPED)
 
 
@@ -90,12 +92,28 @@ class MissionSettings:
     max_tasks: int = 20
     # The whole mission, across planner, workers, and inspector.
     max_cost_usd: float | None = None
+    # When the model service is down: how often to wait and try again, and the
+    # first wait (it doubles each time, up to 15 minutes). The defaults ride out
+    # about half an hour of outage before the mission pauses.
+    outage_retries: int = 6
+    outage_wait_seconds: float = 30.0
 
     def __post_init__(self) -> None:
         if self.max_attempts < 1 or self.max_tasks < 1:
             raise ValueError("max_attempts and max_tasks must be positive")
         if self.max_cost_usd is not None and self.max_cost_usd <= 0:
             raise ValueError("max_cost_usd must be positive")
+        if self.outage_retries < 0 or self.outage_wait_seconds <= 0:
+            raise ValueError("outage_retries must be >= 0 and outage_wait_seconds positive")
+
+    def outage_waits(self) -> list[float]:
+        """Seconds to wait before each retry while the service is unavailable."""
+        first = self.outage_wait_seconds
+        return [min(first * 2**i, MAX_OUTAGE_WAIT_SECONDS) for i in range(self.outage_retries)]
+
+
+class _Outage(Exception):
+    """The model service stayed unavailable through every retry."""
 
 
 @dataclass
@@ -117,6 +135,7 @@ class Supervisor:
         *,
         settings: MissionSettings | None = None,
         events: EventBus | None = None,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.make_agent = make_agent
         self.checks = checks
@@ -125,6 +144,7 @@ class Supervisor:
         self.settings = settings or MissionSettings()
         self.events = events or EventBus()
         self.events.subscribe(self._watch)
+        self.sleep = sleep
         self._suspicions: list[str] = []
 
     # -- publishing -------------------------------------------------------
@@ -133,7 +153,7 @@ class Supervisor:
         """Have the planner break ``goal`` into tasks, and save the mission."""
         publish = PublishTasks(self.settings.max_tasks)
         planner = self.make_agent(Role.PLANNER, [publish])
-        result = planner.run(planner_prompt(goal, self.settings.max_tasks))
+        result = self._ride_out(planner, planner.run(planner_prompt(goal, self.settings.max_tasks)))
         if publish.tasks is None:
             # No mission exists to file a warning under; don't pin these on a later task.
             self._suspicions.clear()
@@ -163,7 +183,17 @@ class Supervisor:
                     f"with {left} tasks left; raise it and run the mission again",
                 )
                 break
-            self._run_task(mission, task)
+            try:
+                self._run_task(mission, task)
+            except _Outage as outage:
+                self._notify(
+                    mission,
+                    task.id,
+                    BLOCKER,
+                    f"the model service is unavailable ({outage}); the mission paused "
+                    f"with {task.id} still pending. Resume with: guardrun mission run {mission.id}",
+                )
+                break
             self.store.save(mission)
         self.store.save(mission)
         self.events.emit(
@@ -210,7 +240,13 @@ class Supervisor:
         used = len(task.attempts) - task.round_start
         for _ in range(max(self.settings.max_attempts - used, 0)):
             self.events.emit(
-                "task_started", task=task.id, title=task.title, attempt=len(task.attempts) + 1
+                "task_started",
+                task=task.id,
+                title=task.title,
+                attempt=len(task.attempts) + 1,
+                position=_position(mission, task),
+                total=len(mission.tasks),
+                spent_usd=mission.cost_usd,
             )
             if self._attempt(mission, task, worker, escalate, prompt):
                 break
@@ -257,9 +293,35 @@ class Supervisor:
             self._settle(task, TaskStatus.PASSED, feedback)
         return passed
 
+    def _ride_out(self, agent: Agent, result: RunResult) -> RunResult:
+        """Wait out a provider outage and resume the run; costs of every try add up."""
+        cost = result.cost_usd or 0.0
+        waits = self.settings.outage_waits()
+        for number, seconds in enumerate(waits, start=1):
+            if not result.retryable:
+                break
+            self.events.emit(
+                "service_waiting",
+                seconds=seconds,
+                retry=number,
+                retries=len(waits),
+                detail=result.detail,
+            )
+            self.sleep(seconds)
+            result = agent.resume()
+            cost += result.cost_usd or 0.0
+        return dataclasses.replace(result, cost_usd=cost)
+
+    def _call(self, mission: Mission, agent: Agent, prompt: str) -> RunResult:
+        """One role run that survives short outages; a lasting one pauses the mission."""
+        result = self._spend(mission, self._ride_out(agent, agent.run(prompt)))
+        if result.retryable:
+            raise _Outage(result.detail)
+        return result
+
     def _work(self, mission: Mission, worker: Agent, escalate: Escalate, prompt: str) -> _Work:
         escalate.reason = None
-        result = self._spend(mission, worker.run(prompt))
+        result = self._call(mission, worker, prompt)
         summary = result.text.strip()[:MAX_SUMMARY_CHARS] or f"(no summary; ended {result.stop})"
         return _Work(result, summary, escalate.reason)
 
@@ -268,8 +330,8 @@ class Supervisor:
     ) -> Verdict | None:
         submit = SubmitVerdict()
         inspector = self.make_agent(Role.INSPECTOR, [submit])
-        result = self._spend(
-            mission, inspector.run(inspector_prompt(task, summary, format_checks(results)))
+        result = self._call(
+            mission, inspector, inspector_prompt(task, summary, format_checks(results))
         )
         if submit.verdict is None and result.stop not in FATAL_STOPS:
             text = result.text.strip()[:1000] or "no reason given"
@@ -321,6 +383,12 @@ class Supervisor:
                 mission, task_id, WARNING, f"possible prompt injection in tool output: {phrases}"
             )
             self._suspicions.clear()
+
+
+def _position(mission: Mission, task: Task) -> int:
+    """1-based place of ``task`` in the run: settled tasks come first."""
+    settled = sum(1 for t in mission.tasks if t.status is not TaskStatus.PENDING)
+    return settled + 1
 
 
 def _blocked_message(commands: list[str]) -> str:

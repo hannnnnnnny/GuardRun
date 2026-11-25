@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 
+from guardrun.errors import ProviderError
 from guardrun.events import EventBus
 from guardrun.factory import AgentOptions
 from guardrun.messages import ModelResponse
@@ -48,11 +49,14 @@ def work(path: str = "out.txt", content: str = "done") -> list[ModelResponse]:
 
 
 class Harness:
-    def __init__(self, root: Path, turns: list[ModelResponse], **settings: Any) -> None:
+    def __init__(
+        self, root: Path, turns: list[ModelResponse | ProviderError], **settings: Any
+    ) -> None:
         self.root = root
         self.provider = ScriptedProvider(turns)
         self.events = EventBus()
         self.seen: list[tuple[str, dict[str, Any]]] = []
+        self.waits: list[float] = []
         self.events.subscribe(lambda e: self.seen.append((e.kind, e.data)))
         self.store = MissionStore(root / ".guardrun" / "missions")
         self.inbox = Inbox(root / ".guardrun" / "inbox.jsonl")
@@ -64,6 +68,7 @@ class Harness:
             self.inbox,
             settings=MissionSettings(**settings),
             events=self.events,
+            sleep=self.waits.append,
         )
 
     def kinds(self, kind: str) -> list[dict[str, Any]]:
@@ -77,8 +82,10 @@ class Harness:
 
 @pytest.fixture
 def harness(tmp_path: Path) -> Any:
-    def make(*turns: ModelResponse | list[ModelResponse], **settings: Any) -> Harness:
-        flat: list[ModelResponse] = []
+    def make(
+        *turns: ModelResponse | ProviderError | list[ModelResponse], **settings: Any
+    ) -> Harness:
+        flat: list[ModelResponse | ProviderError] = []
         for turn in turns:
             flat.extend(turn if isinstance(turn, list) else [turn])
         return Harness(tmp_path, flat, **settings)

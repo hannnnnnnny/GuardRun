@@ -37,6 +37,8 @@ class RunResult:
     usage: Usage
     cost_usd: float | None = None
     detail: str = ""
+    # An "error" stop caused by a provider outage; ``Agent.resume`` may finish the run.
+    retryable: bool = False
 
     @property
     def ok(self) -> bool:
@@ -84,8 +86,18 @@ class Agent:
 
         Calling ``run`` again continues the same conversation.
         """
-        self._cancelled.clear()
         self.conversation.add_user_text(task)
+        return self._run(task)
+
+    def resume(self) -> RunResult:
+        """Continue after a run ended waiting on the model (e.g. a provider outage),
+        without adding a message; the model call that failed is simply made again."""
+        if self.conversation.last_role != "user":
+            raise ValueError("nothing to resume: the model already answered")
+        return self._run("(resumed)")
+
+    def _run(self, task: str) -> RunResult:
+        self._cancelled.clear()
         tracker = BudgetTracker(self.budget, self.provider.model)
         self.events.emit("run_started", task=task)
         try:
@@ -93,7 +105,9 @@ class Agent:
         except BudgetExceeded as exc:
             result = self._result("budget", tracker, detail=str(exc))
         except ProviderError as exc:
-            result = self._result("error", tracker, detail=str(exc))
+            result = dataclasses.replace(
+                self._result("error", tracker, detail=str(exc)), retryable=exc.transient
+            )
         self.events.emit(
             "run_finished",
             stop=result.stop,

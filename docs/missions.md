@@ -62,13 +62,45 @@ The inbox (`.guardrun/inbox.jsonl`, shown by `guardrun inbox`) receives only:
 | `blocker` | a worker or inspector run failed (provider error, refusal) |
 | `blocker` | a check needs approval, which an unattended mission cannot give |
 | `blocker` | the mission's cost cap was reached |
+| `blocker` | the model service stayed unavailable through every retry (the mission paused) |
 | `warning` | tool output looked like a prompt-injection attempt |
 
 Routine feedback and retries stay in the mission record. When a task is not
 settled, tasks that depend on it are skipped and every independent task keeps
 going, so one blocker never stalls the rest of the week.
 
-Inbox entries are redacted like the audit log.
+Inbox entries are redacted like the audit log. `guardrun inbox` shows what is
+new; `guardrun inbox --ack` marks it read once handled, and `--all` shows the
+history.
+
+### Notifications
+
+To hear about a blocker without watching the terminal, set a command in
+`guardrun.toml`. It runs once per inbox notice, with the notice in environment
+variables: `GUARDRUN_NOTICE_LEVEL`, `GUARDRUN_NOTICE_MISSION`,
+`GUARDRUN_NOTICE_TASK`, `GUARDRUN_NOTICE_REASON`, and `GUARDRUN_NOTICE_TIME`.
+
+```toml
+[mission]
+# Push to a phone with ntfy.sh (pick a hard-to-guess topic name):
+notify_command = 'curl -s -d "$GUARDRUN_NOTICE_LEVEL: $GUARDRUN_NOTICE_REASON" ntfy.sh/my-guardrun-x7k2'
+```
+
+The notice is passed only through those variables, never pasted into the
+command, so text a model wrote cannot change what runs. The command gets the
+same scrubbed environment as the agent's shell (no API keys), a 30-second
+timeout, and a failure is printed as a warning without stopping the mission.
+
+## Outages
+
+A mission can run for days, and model services have bad minutes. When a call
+fails because of a rate limit, overload, server error, or network trouble, the
+mission waits and makes the same call again (30 seconds, then 1, 2, 4, 8, and
+15 minutes by default; see `outage_retries` and `outage_wait_seconds`). The
+conversation is kept, so no work is repeated. If the service is still down
+after the last retry, the mission pauses with one inbox notice instead of
+escalating every task; `guardrun mission run ID` picks up from there. Problems
+that waiting cannot fix, such as a wrong API key, are reported at once.
 
 ## Plan files
 
@@ -100,7 +132,8 @@ longer example.
 
 Missions are saved under `.guardrun/missions/` after every attempt. Running
 `guardrun mission run ID` again continues with the pending tasks, including one
-that was interrupted (it restarts with the last inspector feedback).
+that was interrupted (it restarts with the last inspector feedback, and its
+earlier attempts still count toward `max_attempts`).
 `--retry` requeues failed, escalated, and skipped tasks once you have dealt
 with the inbox.
 

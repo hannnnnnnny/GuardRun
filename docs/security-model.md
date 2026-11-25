@@ -61,6 +61,16 @@ timeout that kills the whole process tree, capped output, and an
 settings are passed, and anything with a secret-looking name is dropped even if
 allowlisted.
 
+On Windows the shell is Git Bash. The `bash.exe` launchers in the Windows
+directory and in WindowsApps start WSL instead (a different filesystem and
+environment), so they are skipped.
+
+`[mission] notify_command` runs outside the command policy because it comes
+from your own config, like the policy itself. It receives notices only through
+environment variables and gets the same scrubbed environment. A
+`guardrun.toml` from a repository you do not trust deserves the same review as
+any script in it.
+
 ## Layer 3b: network access
 
 `web_fetch` is disabled unless `[network] enabled = true`. When enabled:

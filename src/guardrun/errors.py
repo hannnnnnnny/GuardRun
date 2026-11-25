@@ -44,4 +44,13 @@ class BudgetExceeded(GuardRunError):
 
 
 class ProviderError(GuardRunError):
-    """Raised when the model provider fails in a way the loop cannot recover from."""
+    """Raised when the model provider fails in a way the loop cannot recover from.
+
+    ``transient`` marks outages (rate limits, overload, server errors, network
+    trouble) that the SDK's own quick retries did not ride out but that waiting
+    longer may fix, as opposed to problems like a bad key or a rejected request.
+    """
+
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient

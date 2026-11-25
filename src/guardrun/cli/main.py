@@ -12,12 +12,14 @@ from typing import Any, TextIO
 
 from guardrun import __version__
 from guardrun.agent import Agent, RunResult
+from guardrun.cli.chat import run_chat
 from guardrun.cli.mission import add_parsers as add_mission_parsers
 from guardrun.cli.mission import cmd_inbox, cmd_mission, cmd_mission_status
 from guardrun.cli.render import ConsoleRenderer, format_result, result_to_dict
 from guardrun.cli.starter import STARTER_CONFIG
+from guardrun.cli.style import PLAIN, Style, style_for
 from guardrun.config import CONFIG_FILENAME, PROVIDER_DEFAULT_MODELS, Config, load_config
-from guardrun.doctor import FAIL, run_checks
+from guardrun.doctor import FAIL, OK, WARN, run_checks
 from guardrun.errors import ConfigError, GuardRunError
 from guardrun.factory import STATE_DIR, build_agent, options_from_config
 from guardrun.providers.anthropic import EFFORT_LEVELS, AnthropicProvider
@@ -45,6 +47,7 @@ class IO:
     stdout: TextIO
     stderr: TextIO
     interactive: bool
+    style: Style = PLAIN
 
 
 def _add_run_options(parser: argparse.ArgumentParser) -> None:
@@ -61,9 +64,11 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="guardrun", description="A safety-first Claude agent.")
+    parser = argparse.ArgumentParser(
+        prog="guardrun", description="A safety-first agent for DeepSeek and Claude."
+    )
     parser.add_argument("--version", action="version", version=f"guardrun {__version__}")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command")
     run = sub.add_parser("run", help="run one task and exit")
     run.add_argument("task", help="what the agent should do")
     run.add_argument(
@@ -131,6 +136,9 @@ class CliSession:
     model: str
     title: str = ""
     json_output: bool = False
+    runs: int = 0
+    usage: Usage = dataclasses.field(default_factory=Usage)
+    cost_usd: float = 0.0
 
     def run(self, task: str, io: IO) -> RunResult:
         self.title = self.title or task
@@ -139,11 +147,15 @@ class CliSession:
         except KeyboardInterrupt:
             self.agent.cancel()
             result = RunResult("", "cancelled", 0, Usage(), detail="interrupted by user")
+        self.runs += 1
+        self.usage = self.usage + result.usage
+        self.cost_usd += result.cost_usd or 0.0
         self.store.save(self.id, self.agent.conversation, title=self.title, model=self.model)
         if self.json_output:
             io.stdout.write(json.dumps(result_to_dict(result, self.id), ensure_ascii=False) + "\n")
         else:
-            io.stdout.write(format_result(result) + f"\nsession: {self.id}\n")
+            session = io.style.dim(f"session: {self.id}")
+            io.stdout.write(format_result(result, io.style) + f"\n{session}\n")
         return result
 
 
@@ -152,7 +164,11 @@ def _session_store(workspace: Path) -> SessionStore:
 
 
 def _make_session(
-    args: argparse.Namespace, config: Config, io: IO, provider_factory: ProviderFactory
+    args: argparse.Namespace,
+    config: Config,
+    io: IO,
+    provider_factory: ProviderFactory,
+    resume: str | None = None,
 ) -> CliSession:
     store = _session_store(args.workspace)
     # JSON output must stay machine-readable, so it never shows prompts or progress.
@@ -160,30 +176,28 @@ def _make_session(
     interactive = io.interactive and not json_output
     approver = ConsoleApprover(io.stdin, io.stdout) if interactive else deny_all
     options = options_from_config(config, approver, root=args.workspace)
-    options.conversation = store.load(args.resume) if args.resume else None
+    options.conversation = store.load(resume) if resume else None
     if not json_output:
-        options.events.subscribe(ConsoleRenderer(io.stdout, verbose=args.verbose))
+        options.events.subscribe(ConsoleRenderer(io.stdout, args.verbose, io.style))
     agent = build_agent(args.workspace, provider_factory(config), options)
-    session_id = args.resume or new_session_id()
+    session_id = resume or new_session_id()
     return CliSession(agent, store, session_id, config.resolved_model, json_output=json_output)
 
 
 def cmd_run(args: argparse.Namespace, config: Config, io: IO, factory: ProviderFactory) -> int:
-    result = _make_session(args, config, io, factory).run(args.task, io)
+    result = _make_session(args, config, io, factory, args.resume).run(args.task, io)
     return EXIT_OK if result.ok else EXIT_INCOMPLETE
 
 
 def cmd_chat(args: argparse.Namespace, config: Config, io: IO, factory: ProviderFactory) -> int:
-    session = _make_session(args, config, io, factory)
-    io.stdout.write("guardrun chat - type /exit to quit\n")
-    while True:
-        io.stdout.write("you> ")
-        io.stdout.flush()
-        line = io.stdin.readline()
-        if not line or line.strip() in {"/exit", "/quit"}:
-            return EXIT_OK
-        if line.strip():
-            session.run(line.strip(), io)
+    pending_resume = [args.resume]
+
+    def new_session() -> CliSession:
+        # Only the first conversation resumes; /new always starts fresh.
+        resume = pending_resume.pop() if pending_resume else None
+        return _make_session(args, config, io, factory, resume)
+
+    return run_chat(new_session, config, args.workspace, io)
 
 
 def cmd_sessions(args: argparse.Namespace, io: IO) -> int:
@@ -250,9 +264,35 @@ def cmd_init(args: argparse.Namespace, io: IO) -> int:
 
 def cmd_doctor(args: argparse.Namespace, io: IO) -> int:
     checks = run_checks(args.workspace)
+    paint = {OK: io.style.ok, WARN: io.style.warn, FAIL: io.style.error}
     for check in checks:
-        io.stdout.write(f"[{check.status:4}] {check.name:12} {check.detail}\n")
-    return EXIT_INCOMPLETE if any(c.status == FAIL for c in checks) else EXIT_OK
+        status = paint[check.status](f"[{check.status:4}]")
+        io.stdout.write(f"{status} {check.name:12} {check.detail}\n")
+    failed = any(c.status == FAIL for c in checks)
+    if not failed and any(c.status == WARN for c in checks):
+        io.stdout.write(
+            io.style.dim("warnings don't stop GuardRun, but fix them for the best results\n")
+        )
+    return EXIT_INCOMPLETE if failed else EXIT_OK
+
+
+OVERVIEW = """\
+  guardrun run "TASK"                 do one task and exit
+  guardrun chat                       talk with the agent, turn by turn
+  guardrun mission plan "GOAL" --run  plan, do, and inspect a big goal unattended
+  guardrun mission status             progress of your missions
+  guardrun inbox                      only what needs you
+  guardrun doctor                     check your setup (API key, shell, config)
+  guardrun init                       write a starter guardrun.toml
+  guardrun --help                     every command and option
+"""
+
+
+def overview(io: IO) -> int:
+    """What a bare ``guardrun`` prints: the handful of commands people actually need."""
+    title = io.style.bold(f"GuardRun {__version__}")
+    io.stdout.write(f"{title} - a safety-first agent for DeepSeek and Claude\n\n{OVERVIEW}")
+    return EXIT_OK
 
 
 # Commands that only inspect local state and never need the config file.
@@ -287,8 +327,16 @@ def main(
     io: IO | None = None,
     provider_factory: ProviderFactory = default_provider,
 ) -> int:
-    io = io or IO(sys.stdin, sys.stdout, sys.stderr, interactive=sys.stdin.isatty())
+    io = io or IO(
+        sys.stdin,
+        sys.stdout,
+        sys.stderr,
+        interactive=sys.stdin.isatty(),
+        style=style_for(sys.stdout),
+    )
     args = build_parser().parse_args(argv)
+    if args.command is None:
+        return overview(io)
     args.workspace = args.workspace.resolve()
     if not args.workspace.is_dir():
         io.stderr.write(f"guardrun: workspace {args.workspace} is not a directory\n")

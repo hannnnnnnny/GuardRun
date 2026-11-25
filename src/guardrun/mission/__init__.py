@@ -2,6 +2,7 @@
 
 from guardrun.mission.checks import CheckResult, CheckRunner
 from guardrun.mission.inbox import BLOCKER, WARNING, Inbox, Notice
+from guardrun.mission.notify import CommandNotifier
 from guardrun.mission.plan import (
     Attempt,
     Mission,
@@ -27,6 +28,7 @@ __all__ = [
     "Attempt",
     "CheckResult",
     "CheckRunner",
+    "CommandNotifier",
     "Inbox",
     "Mission",
     "MissionError",

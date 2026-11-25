@@ -56,6 +56,31 @@ class Inbox:
             notify(notice)
         return notice
 
+    @property
+    def _seen_path(self) -> Path:
+        return self.path.with_name(self.path.name + ".seen")
+
+    def seen_count(self) -> int:
+        """How many notices (oldest first) the user has marked as read."""
+        try:
+            return max(int(self._seen_path.read_text(encoding="utf-8").strip()), 0)
+        except FileNotFoundError:
+            return 0
+        except (OSError, ValueError):
+            # An unreadable marker only means notices show as new again.
+            return 0
+
+    def mark_seen(self, count: int) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._seen_path.write_text(str(max(count, 0)), encoding="utf-8")
+
+    def unread(self) -> tuple[list[Notice], list[Notice]]:
+        """(read, unread) notices; if the inbox shrank, everything counts as new."""
+        notices = self.read()
+        seen = self.seen_count()
+        seen = seen if seen <= len(notices) else 0
+        return notices[:seen], notices[seen:]
+
     def read(self) -> list[Notice]:
         """All notices, oldest first; malformed lines are skipped."""
         if not self.path.exists():

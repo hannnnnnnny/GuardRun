@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 
+from guardrun.errors import ProviderError
 from guardrun.mission import (
     BLOCKER,
     WARNING,
@@ -221,7 +222,16 @@ def test_worker_mode_never_needs_a_human() -> None:
     assert worker_mode(ApprovalMode.READ_ONLY) is ApprovalMode.READ_ONLY
 
 
-@pytest.mark.parametrize("kwargs", [{"max_attempts": 0}, {"max_tasks": 0}, {"max_cost_usd": 0.0}])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"max_attempts": 0},
+        {"max_tasks": 0},
+        {"max_cost_usd": 0.0},
+        {"outage_retries": -1},
+        {"outage_wait_seconds": 0},
+    ],
+)
 def test_invalid_settings(kwargs: dict[str, Any]) -> None:
     with pytest.raises(ValueError, match="positive"):
         MissionSettings(**kwargs)
@@ -298,3 +308,40 @@ def test_retry_grants_a_fresh_round(harness: Make) -> None:
     assert m.tasks[0].round_start == 1
     h.supervisor.run(m)
     assert m.tasks[0].status is TaskStatus.PASSED
+
+
+def _outage() -> ProviderError:
+    return ProviderError("API error 529: overloaded", transient=True)
+
+
+def test_short_outage_is_waited_out(harness: Make) -> None:
+    h = harness(_outage(), _outage(), *work(), verdict(True), outage_wait_seconds=10)
+    m = h.supervisor.run(mission())
+    assert m.status == "done"
+    assert h.waits == [10, 20]
+    assert [d["retry"] for d in h.kinds("service_waiting")] == [1, 2]
+    assert h.inbox.read() == []
+
+
+def test_lasting_outage_pauses_the_mission(harness: Make) -> None:
+    h = harness(*[_outage()] * 3, outage_retries=2)
+    m = h.supervisor.run(mission(task("a"), task("b")))
+    assert [t.status for t in m.tasks] == [TaskStatus.PENDING, TaskStatus.PENDING]
+    assert m.tasks[0].attempts == []
+    (notice,) = h.inbox.read()
+    assert notice.level == BLOCKER
+    assert f"guardrun mission run {m.id}" in notice.reason
+    assert h.store.load(m.id).status == "in-progress"
+
+
+def test_permanent_errors_are_not_waited_on(harness: Make) -> None:
+    h = harness(ProviderError("authentication failed"))
+    m = h.supervisor.run(mission())
+    assert h.waits == []
+    assert m.tasks[0].status is TaskStatus.ESCALATED
+
+
+def test_outage_waits_double_up_to_a_cap() -> None:
+    settings = MissionSettings(outage_retries=8, outage_wait_seconds=60)
+    assert settings.outage_waits() == [60, 120, 240, 480, 900, 900, 900, 900]
+    assert MissionSettings(outage_retries=0).outage_waits() == []

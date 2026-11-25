@@ -4,6 +4,12 @@ Every command accepts `-w/--workspace DIR` (default: the current directory).
 Exit codes: `0` success, `1` the run ended without completing (budget, refusal,
 stuck, cancelled, error), `2` usage or configuration error.
 
+`guardrun` on its own prints the handful of commands most people need.
+
+Output is coloured on an interactive terminal (green ok, yellow needs attention,
+red error) and plain when piped or redirected. Set `NO_COLOR=1` to turn colour
+off, or `FORCE_COLOR=1` to keep it in CI logs.
+
 ## `guardrun run TASK`
 
 Run one task to completion and print the answer plus a summary line.
@@ -28,8 +34,18 @@ explicit, or pre-approve commands in `guardrun.toml`.
 ## `guardrun chat`
 
 Interactive session with the same flags as `run`. Each message continues the
-conversation; `/exit` or end-of-file quits. The session id is printed after
-every reply.
+conversation. A banner shows the model, approval mode, and workspace.
+
+| Command | Does |
+|---|---|
+| `/help` | list the commands |
+| `/usage` | replies, tokens, and cost of this chat so far |
+| `/session` | the session id and the `--resume` command to continue later |
+| `/new` | start a fresh conversation (a new session) |
+| `/exit`, `/quit` | leave; so do Ctrl+D and Ctrl+C at the prompt |
+
+Ctrl+C while the agent is replying stops only that reply. Start a message with
+`//` to send text that begins with `/`.
 
 ## `guardrun mission`
 
@@ -48,11 +64,21 @@ Long, unattended work: AI publishes tasks, does them, and inspects them. See
 per task), `--no-audit`, and `-v` (show every tool call). They never prompt.
 Exit code `0` means every task passed.
 
+Progress shows each task as `[2/5] id: title`, with the attempt number and the
+mission's spending so far. If the model service is down, the mission waits and
+retries (see [Missions](missions.md#outages)); a blocker rings the terminal bell.
+
 ## `guardrun inbox`
 
 What missions need you to look at, oldest first: blockers (escalations, tasks
-that failed inspection, spent budgets) and warnings (suspected prompt
-injection). `-n N` controls how many entries.
+that failed inspection, spent budgets, outages) and warnings (suspected prompt
+injection). By default only notices you have not marked as read are shown.
+
+| Flag | Meaning |
+|---|---|
+| `--ack` | mark every notice as read once you have dealt with them |
+| `-a`, `--all` | include notices already read |
+| `-n N` | show at most N entries (default 20) |
 
 ## `guardrun sessions`
 

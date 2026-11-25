@@ -97,13 +97,20 @@ class AnthropicProvider:
         except anthropic.AuthenticationError as exc:
             raise ProviderError(f"authentication failed: {self.auth_hint}") from exc
         except anthropic.RateLimitError as exc:
-            raise ProviderError("rate limited by the API after retries; try again later") from exc
+            raise ProviderError(
+                "rate limited by the API after retries; try again later", transient=True
+            ) from exc
         except anthropic.BadRequestError as exc:
             raise ProviderError(f"the API rejected the request: {exc.message}") from exc
         except anthropic.APIStatusError as exc:
-            raise ProviderError(f"API error {exc.status_code}: {exc.message}") from exc
+            # 5xx and 529 (overloaded) are the service's problem and usually pass.
+            raise ProviderError(
+                f"API error {exc.status_code}: {exc.message}", transient=exc.status_code >= 500
+            ) from exc
         except anthropic.APIConnectionError as exc:
-            raise ProviderError(f"could not reach the {self.service_name} API") from exc
+            raise ProviderError(
+                f"could not reach the {self.service_name} API", transient=True
+            ) from exc
         return to_model_response(message)
 
     def _stream(self, params: dict[str, Any]) -> Any:

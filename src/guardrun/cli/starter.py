@@ -45,6 +45,10 @@ parallel_reads = true
 max_attempts = 3
 max_tasks = 20
 # max_cost_usd = 20.0
+# When the model service is down, wait and retry (30s, doubling) this many times.
+outage_retries = 6
+# Run a command for every inbox notice, e.g. push it to your phone with ntfy.sh:
+# notify_command = 'curl -s -d "$GUARDRUN_NOTICE_REASON" ntfy.sh/my-guardrun-x7k2'
 
 [network]
 # Enables the web_fetch tool. Private, local, and metadata addresses are never reachable.
