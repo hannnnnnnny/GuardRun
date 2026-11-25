@@ -61,6 +61,9 @@ class Config:
     mission_max_attempts: int = 3
     mission_max_tasks: int = 20
     mission_max_cost_usd: float | None = None
+    mission_outage_retries: int = 6
+    mission_outage_wait_seconds: float = 30.0
+    mission_notify_command: str = ""
     source: Path | None = field(default=None, compare=False)
 
     @property
@@ -91,7 +94,14 @@ _SCHEMA: dict[str, set[str]] = {
         "parallel_reads",
         "max_tool_output_chars",
     },
-    "mission": {"max_attempts", "max_tasks", "max_cost_usd"},
+    "mission": {
+        "max_attempts",
+        "max_tasks",
+        "max_cost_usd",
+        "outage_retries",
+        "outage_wait_seconds",
+        "notify_command",
+    },
 }
 
 
@@ -213,6 +223,25 @@ def _mission_fields(section: dict[str, Any]) -> dict[str, Any]:
     if "max_cost_usd" in section:
         cost = _positive(section["max_cost_usd"], "mission.max_cost_usd")
         fields["mission_max_cost_usd"] = float(cost)
+    fields.update(_mission_resilience_fields(section))
+    return fields
+
+
+def _mission_resilience_fields(section: dict[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    if "outage_retries" in section:
+        retries = _expect(section["outage_retries"], int, "mission.outage_retries")
+        if retries < 0:
+            raise ConfigError("mission.outage_retries must be 0 or more")
+        fields["mission_outage_retries"] = retries
+    if "outage_wait_seconds" in section:
+        wait = _positive(section["outage_wait_seconds"], "mission.outage_wait_seconds")
+        fields["mission_outage_wait_seconds"] = float(wait)
+    if "notify_command" in section:
+        command = _expect(section["notify_command"], str, "mission.notify_command").strip()
+        if not command.isprintable():
+            raise ConfigError("mission.notify_command must be a single line")
+        fields["mission_notify_command"] = command
     return fields
 
 

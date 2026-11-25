@@ -152,6 +152,23 @@ def test_mission_section() -> None:
     defaults = parse_config({})
     assert (defaults.mission_max_attempts, defaults.mission_max_tasks) == (3, 20)
     assert defaults.mission_max_cost_usd is None
+    assert (defaults.mission_outage_retries, defaults.mission_outage_wait_seconds) == (6, 30.0)
+    assert defaults.mission_notify_command == ""
+
+
+def test_mission_resilience_settings() -> None:
+    config = parse_config(
+        {
+            "mission": {
+                "outage_retries": 0,
+                "outage_wait_seconds": 5,
+                "notify_command": '  curl -d "$GUARDRUN_NOTICE_REASON" ntfy.sh/me  ',
+            }
+        }
+    )
+    assert config.mission_outage_retries == 0
+    assert config.mission_outage_wait_seconds == 5.0
+    assert config.mission_notify_command.startswith("curl")
 
 
 @pytest.mark.parametrize(
@@ -162,6 +179,11 @@ def test_mission_section() -> None:
         {"max_tasks": 51},
         {"max_cost_usd": -1},
         {"retries": 2},
+        {"outage_retries": -1},
+        {"outage_retries": 1.5},
+        {"outage_wait_seconds": 0},
+        {"notify_command": 5},
+        {"notify_command": "echo a\nrm -rf /"},
     ],
 )
 def test_invalid_mission_section(mission: dict[str, Any]) -> None:
