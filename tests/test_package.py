@@ -4,7 +4,7 @@ import guardrun
 
 
 def test_version_is_exposed() -> None:
-    assert guardrun.__version__ == "0.2.1"
+    assert guardrun.__version__ == "0.3.0"
 
 
 def test_top_level_api() -> None:
